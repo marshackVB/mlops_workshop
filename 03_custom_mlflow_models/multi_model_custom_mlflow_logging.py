@@ -1,5 +1,7 @@
 # Databricks notebook source
-# MAGIC %md ### Custom MLflow model and distributed training with PandasUDFs
+# MAGIC %md ### Custom MLflow model and distributed training with PandasUDFs. 
+# MAGIC **Relavent documentation**:
+# MAGIC - [Building custom models with MLflow](https://mlflow.org/docs/latest/ml/traditional-ml/tutorials/creating-custom-pyfunc/)
 
 # COMMAND ----------
 
@@ -28,20 +30,29 @@ from databricks.sdk import WorkspaceClient
 
 # COMMAND ----------
 
+dbutils.widgets.text('catalog_name','','Enter catalog name')
+dbutils.widgets.text('schema_name','','Enter schema name')
+dbutils.widgets.text('volume_name','','Enter volume name')
+dbutils.widgets.text('experiment_name','','Enter experiment name')
+dbutils.widgets.text('suffix','','Enter table suffix')
+
+# COMMAND ----------
+
+#dbutils.widgets.removeAll()
+
+# COMMAND ----------
+
 mlflow.sklearn.autolog(disable=True)
-exerpiment_path = "/Users/marshall.carter@databricks.com/workshop_experiment_mlc"
+experiment_name = dbutils.widgets.get('experiment_name')
+user_email = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()
+exerpiment_path = f"/Users/{user_email}/{experiment_name}"
 mlflow.set_experiment(exerpiment_path) 
 mlflow.set_registry_uri("databricks-uc")
 
-# COMMAND ----------
-
-dbutils.widgets.text('catalog_name','','Enter catalog name')
-dbutils.widgets.text('schema_name','','Enter schema name')
-
-# COMMAND ----------
-
 catalog_name = dbutils.widgets.get('catalog_name')
 schema_name = dbutils.widgets.get('schema_name')
+suffix = dbutils.widgets.get('suffix')
+volume_name = dbutils.widgets.get('volume_name')
 uc_location = f"{catalog_name}.{schema_name}"
 output_delta_location = f"{uc_location}.regression_models"
 print(f"UC location: {uc_location}")
@@ -49,9 +60,6 @@ print(f"UC location: {uc_location}")
 # COMMAND ----------
 
 client = MlflowClient()
-
-# COMMAND ----------
-
 mlflow.autolog(disable=True)
 
 # COMMAND ----------
@@ -67,20 +75,8 @@ n_skus = 10000
 n_features_per_sku = 10
 n_samples_per_sku = 100
 
-# DBFS directory or UC volume to store model artifacts
-regression_model_dbfs_directory = '/Volumes/shared/mlc_schema/regression_models'
-"""
-regression_model_dbfs_directory_python = f"/{regression_model_dbfs_directory.replace(':', '')}"
-
-# Create the directory or delete and recreate if exists
-try: 
-  dbutils.fs.rm(regression_model_dbfs_directory, recurse=True)
-  dbutils.fs.mkdirs(regression_model_dbfs_directory)
-except:
-  dbutils.fs.mkdirs(regression_model_dbfs_directory)
-
-dbutils.fs.ls(regression_model_dbfs_directory)
-"""
+# UC volume to store model artifacts
+regression_model_dbfs_directory = f'/Volumes/shared/mlc_schema/{volume_name}'
 
 # COMMAND ----------
 
@@ -243,8 +239,7 @@ bundle = {
     for _, row in model_pd.iterrows()
 }
 
-bundle_path = f"{regression_model_dbfs_directory}/all_regression_models.pkl"
-#bundle_path = "/dbfs/Users/marshall.carter@databricks.com/all_regression_models.pkl"
+bundle_path = f"{regression_model_dbfs_directory}/all_regression_models_{suffix}.pkl"
 with open(bundle_path, "wb") as f:
     pickle.dump(bundle, f, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -265,7 +260,7 @@ metrics_df = spark.table(output_delta_location).select(
        "metric_r2",
        "feature_names",
    ).toPandas()
-metrics_path = f"{regression_model_dbfs_directory}/regression_metrics.csv"
+metrics_path = f"{regression_model_dbfs_directory}/regression_metrics_{suffix}.csv"
 metrics_df.to_csv(metrics_path, index=False)
 
 # COMMAND ----------
@@ -339,7 +334,7 @@ with mlflow.start_run() as run:
 
 # COMMAND ----------
 
-local_path = client.download_artifacts(run_id, "evaluations/regression_metrics.csv")
+local_path = client.download_artifacts(run_id, f"evaluations/regression_metrics_{suffix}.csv")
 metrics_df = pd.read_csv(local_path)
 metrics_df.head()
 
